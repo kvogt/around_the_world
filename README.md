@@ -17,8 +17,20 @@ There are many other ways to solve this problem. This algorithm is not the faste
 
 Lastly, the modeling used for aircraft performance, flight profiles, and weather is extremely simplistic. This enables faster searching but yield less accurate results. I sent some of my top routes to a professional flight department to be benchmarked and found that my simple modeling led to only ~2.5% error for a ~40 hour route. Better modeling would certainly improve the error, but it would likely be slower.
 
+## Sample Usage
+
+To force the search to start with an airport from Antarctica and then go to one in South America:
+
+```python seven_continents.py --start-from-continent-codes AN,SA```
+
+To fix the first three airports to KOAK, SBGL, and FACT:
+
+```python seven_continents.py --start-from-airport-codes KOAK,SBGL,FACT```
+
 ## Sample Output
-An HTML report is generated for analyzing the results. The top routes are listed and visualized using the Google Maps API. You can view a full sample report [here](results/sample/sample.html).
+An HTML report is generated for analyzing the results. The top routes are listed and visualized using the Google Maps API. You can view a full sample report [here](results/sample/sample.html). Included in the report are images like this:
+
+![Sample Image](results/sample/1.png)
 
 ## Command Line Options
 
