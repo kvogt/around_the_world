@@ -221,7 +221,7 @@ def load_data(args):
 	
 	# Filter out badly paved runways
 	#   See ICAO surface definitions: https://en.wikipedia.org/wiki/Runway
-	valid_runways = [r for r in valid_runways if r.get('surface', '').upper()[:3] in ['ASP', 'CON', 'BIT', 'PEM']]
+	valid_runways = [r for r in valid_runways if r.get('surface', '').upper()[:3] in ['ICE', 'ASP', 'CON', 'BIT', 'PEM']]
 
 	# Filter airports based on whether they contain a valid runway
 	airport_ids = [runway['airport_ident'] for runway in valid_runways]
