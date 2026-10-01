@@ -1,4 +1,5 @@
 import random
+import collections
 import csv
 import time
 import sys
@@ -6,6 +7,10 @@ import urllib
 import argparse
 import math
 import struct
+
+import itertools
+
+import multiprocessing
 
 #from geopy.distance import distance as get_dist
 # This is roughly 15x faster although up to 0.5% off
@@ -340,9 +345,121 @@ def generate_ordered_sequences(waypoint_lists):
 	else:
 		sequences = waypoint_lists[0]
 	return sequences
+
+Parent = collections.namedtuple('Parent', ['id', 'cost'])
+SingleDPJob = collections.namedtuple('SingleDPJob', ['continent_order', 'airports_by_continent', 'all_airports_by_id'])
+class Search2(object):
+	def __init__(self, data, args):
+		self.data = data
+		self.args = args
+		self.setup_search()
 	
+
+	def run(self):
+#		import pdb; pdb.set_trace()
+		start = time.time()
+		def continent_orders():
+			num_orders_for_process = math.factorial(7) / self.args.num_workers + 1
+			start_order = num_orders_for_process * self.args.worker_id
+			last_order = start_order + num_orders_for_process
+			print("worker %d / %d taking on jobs from %d to %d" % (self.args.worker_id, self.args.num_workers, start_order, last_order))
+
+			all_options = list(itertools.permutations(self.data['airports_by_continent'].keys()))
+
+
+			return all_options[start_order:last_order]
+
+		def single_run(job):
+			continent_order = job.continent_order
+			airports_by_continent = job.airports_by_continent
+			all_airports_by_id = job.all_airports_by_id
+			idToParent = {}
+			for airport in airports_by_continent[continent_order[0]]:
+				ID = str(airport['id'])
+				idToParent[ID] = Parent(None, 0)
+
+			for i in range(1, len(continent_order)):
+				oldAirportToCostList = []
+				for old_airport in airports_by_continent[continent_order[i-1]]:
+					oldID = str(old_airport['id'])
+					oldAirportToCostList.append((oldID, idToParent[oldID].cost))
+				oldAirportToCostList.sort(key = lambda x : x[1])
+
+				for new_airport in airports_by_continent[continent_order[i]]:
+					new_parent = Parent(None, 1e9)
+					newID = str(new_airport['id'])
+					for oldID, oldCost in oldAirportToCostList:
+						if oldCost > new_parent.cost:
+							break # no way we can ever win
+
+						addlCost = Route.get_segment_duration(get_plane(i), all_airports_by_id[oldID], all_airports_by_id[newID], data, args)
+						newCost = oldCost + addlCost[1]
+						if newCost < new_parent.cost:
+							new_parent = Parent(oldID, newCost)
+
+					idToParent[newID] = new_parent
+
+			# find best airport
+			idWithCost = [(str(x['id']), idToParent[str(x['id'])].cost ) for x in airports_by_continent[continent_order[-1]]]
+
+			currId = sorted(idWithCost, key = lambda x : x[1])[0][0]
+			expectedCost = idToParent[currId].cost
+
+			route_array = []
+
+			while currId:
+				route_array.append(currId)
+				currId = idToParent[currId].id
+
+			route_array.reverse()
+
+			new_route = Route([self.data['all_airports_by_id'][ID] for ID in route_array])
+
+			if (new_route.get_duration(data, args) - expectedCost) > 1e-3:
+				print("WARNING, COST MISTMATCH FOR ROUTE %s cost is %f instead of %f" % (route_array, new_route.get_duration(data, args), expectedCost))
+			else:
+				print("done processing continent %s. route %s has optimal cost %f" % (job.continent_order, new_route, expectedCost))
+
+			return new_route
+
+		orders = continent_orders()
+		iters = 0
+		best_route = None
+		for continent_order in orders:
+			new_route = single_run(SingleDPJob(continent_order, self.data['airports_by_continent'], self.data['all_airports_by_id']))
+			iters += 1
+
+			print("Have found %d optima in %f seconds" % (iters, time.time() - start))
+
+			if not best_route or new_route.get_duration(data, args) < best_route.get_duration(data, args):
+				best_route = new_route
+			print("best route so far is %s with cost %f" % (best_route, best_route.get_duration(data, args)))
+
+		elapsed_time = time.time() - start
+		return {
+			'best_routes': [best_route],
+			'search_count': 0,
+			'optimize_count': 0,
+			'valid_route_count': 0,
+			'elapsed_time': elapsed_time
+		}
+
+	def setup_search(self):
+		print "Setting up search..."
+		self.data['airports'] = self.data['all_airports']
+		self.data['dist_cache'] = load_dist_cache(self.args.data_path.rstrip('/'), self.data['airports'])
+		airports_by_continent = {}
+		for airport in self.data['airports']:
+			cont = airport['continent']
+			if cont not in airports_by_continent:
+				airports_by_continent[cont] = [airport]
+			else:
+				airports_by_continent[cont].append(airport)	
+		self.data['airports_by_continent'] = airports_by_continent
+
+		print( [ (key, len(self.data['airports_by_continent'][key])) for key in self.data['airports_by_continent'] ])
+
 class Search(object):
-	
 	def __init__(self, data, args):
 		self.data = data
 		self.args = args
@@ -644,6 +761,12 @@ if __name__ == "__main__":
 	parser.add_argument('--data-path', action="store",
 						default="data/",
 						help="Path to CSV files (default is 'data/').")
+	parser.add_argument('--num-workers', action="store",
+						default=1, type=int,
+						help="For parallelization, how many workers")
+	parser.add_argument('--worker-id', action="store",
+						default=0, type=int,
+						help="For parallelization, what worker number is this")
 
 	args = parser.parse_args()
 	
@@ -670,7 +793,7 @@ if __name__ == "__main__":
 	generate_dist_cache(args.data_path.rstrip('/'), data['all_airports'])
 			
 	# Run search until max_searches reached or terminated
-	search = Search(data, args)
+	search = Search2(data, args)
 	results = search.run()
 	
 	# Attempt to open results webpage
